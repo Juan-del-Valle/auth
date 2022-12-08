@@ -1,0 +1,811 @@
+package login
+
+import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/dgrijalva/jwt-go"
+	. "github.com/stretchr/testify/assert"
+	"juandelvalle.com/auth/model"
+	"juandelvalle.com/auth/oauth2"
+)
+
+const TypeJSON = "Content-Type: application/json"
+const TypeForm = "Content-Type: application/x-www-form-urlencoded"
+const AcceptHTML = "Accept: text/html"
+const AcceptJwt = "Accept: application/jwt"
+
+func testConfig() *Config {
+	testConfig := DefaultConfig()
+	testConfig.LoginPath = "/context/login"
+	testConfig.CookieDomain = "example.com"
+	testConfig.CookieExpiry = 23 * time.Hour
+	testConfig.JwtRefreshes = 1
+	return testConfig
+}
+
+func TestHandler_NewFromConfig(t *testing.T) {
+
+	testCases := []struct {
+		config       *Config
+		backendCount int
+		oauthCount   int
+		expectError  bool
+	}{
+		{
+			&Config{
+				Backends: Options{
+					"simple": {"bob": "secret"},
+				},
+				Oauth: Options{
+					"github": {"client_id": "xxx", "client_secret": "YYY"},
+				},
+			},
+			1,
+			1,
+			false,
+		},
+		{
+			&Config{Backends: Options{"simple": {"bob": "secret"}}},
+			1,
+			0,
+			false,
+		},
+		// error cases
+		{
+			// init error because no users are provided
+			&Config{Backends: Options{"simple": {}}},
+			1,
+			0,
+			true,
+		},
+		{
+			&Config{
+				Oauth: Options{
+					"FOOO": {"client_id": "xxx", "client_secret": "YYY"},
+				},
+			},
+			0,
+			0,
+			true,
+		},
+		{
+			&Config{},
+			0,
+			0,
+			true,
+		},
+		{
+			&Config{Backends: Options{"simpleFoo": {"bob": "secret"}}},
+			1,
+			0,
+			true,
+		},
+	}
+	for i, test := range testCases {
+		t.Run(fmt.Sprintf("test %v", i), func(t *testing.T) {
+			h, err := NewHandler(test.config)
+			if test.expectError {
+				Error(t, err)
+			} else {
+				NoError(t, err)
+			}
+			if err == nil {
+				Equal(t, test.backendCount, len(h.backends))
+				Equal(t, test.oauthCount, len(h.oauth.(*oauth2.Manager).GetConfigs()))
+			}
+		})
+	}
+}
+
+func TestHandler_LoginForm(t *testing.T) {
+	recorder := call(req("GET", "/context/login", ""))
+	Equal(t, 200, recorder.Code)
+	Contains(t, recorder.Body.String(), `class="container`)
+	Equal(t, "no-cache, no-store, must-revalidate", recorder.Header().Get("Cache-Control"))
+}
+
+func TestHandler_HEAD(t *testing.T) {
+	recorder := call(req("HEAD", "/context/login", ""))
+	Equal(t, 400, recorder.Code)
+}
+
+func TestHandler_404(t *testing.T) {
+	recorder := call(req("GET", "/context/", ""))
+	Equal(t, 404, recorder.Code)
+
+	recorder = call(req("GET", "/", ""))
+	Equal(t, 404, recorder.Code)
+
+	Equal(t, "Not Found: The requested page does not exist", recorder.Body.String())
+}
+
+func TestHandler_LoginJson(t *testing.T) {
+	// success
+	recorder := call(req("POST", "/context/login", `{"username": "bob", "password": "secret"}`, TypeJSON, AcceptJwt))
+	Equal(t, 200, recorder.Code)
+	Equal(t, recorder.Header().Get("Content-Type"), "application/jwt")
+
+	// verify the token
+	claims, err := tokenAsMap(recorder.Body.String())
+	NoError(t, err)
+	Equal(t, "bob", claims["sub"])
+	InDelta(t, time.Now().Add(DefaultConfig().JwtExpiry).Unix(), claims["exp"], 2)
+
+	// wrong credentials
+	recorder = call(req("POST", "/context/login", `{"username": "bob", "password": "FOOOBAR"}`, TypeJSON, AcceptJwt))
+	Equal(t, 403, recorder.Code)
+	Equal(t, "Wrong credentials", recorder.Body.String())
+}
+
+func TestHandler_HandleOauth(t *testing.T) {
+	managerMock := &oauth2ManagerMock{
+		_GetConfigFromRequest: func(r *http.Request) (oauth2.Config, error) {
+			return oauth2.Config{}, nil
+		},
+	}
+	handler := &Handler{
+		oauth:  managerMock,
+		config: DefaultConfig(),
+	}
+
+	// test start flow redirect
+	managerMock._Handle = func(w http.ResponseWriter, r *http.Request) (
+		startedFlow bool,
+		authenticated bool,
+		userInfo model.UserInfo,
+		err error) {
+		w.Header().Set("Location", "http://example.com")
+		w.WriteHeader(303)
+		return true, false, model.UserInfo{}, nil
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req("GET", "/login/github", ""))
+	Equal(t, 303, recorder.Code)
+	Equal(t, "http://example.com", recorder.Header().Get("Location"))
+
+	// test authentication
+	managerMock._Handle = func(w http.ResponseWriter, r *http.Request) (
+		startedFlow bool,
+		authenticated bool,
+		userInfo model.UserInfo,
+		err error) {
+		return false, true, model.UserInfo{Sub: "marvin"}, nil
+	}
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req("GET", "/login/github", ""))
+	Equal(t, 200, recorder.Code)
+	token, err := tokenAsMap(recorder.Body.String())
+	NoError(t, err)
+	Equal(t, "marvin", token["sub"])
+
+	// test error in oauth
+	managerMock._Handle = func(w http.ResponseWriter, r *http.Request) (
+		startedFlow bool,
+		authenticated bool,
+		userInfo model.UserInfo,
+		err error) {
+		return false, false, model.UserInfo{}, errors.New("some error")
+	}
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req("GET", "/login/github", ""))
+	Equal(t, 500, recorder.Code)
+
+	// test failure if no oauth action would be taken, because the url parameters where
+	// missing an action parts
+	managerMock._Handle = func(w http.ResponseWriter, r *http.Request) (
+		startedFlow bool,
+		authenticated bool,
+		userInfo model.UserInfo,
+		err error) {
+		return false, false, model.UserInfo{}, nil
+	}
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req("GET", "/login/github", ""))
+	Equal(t, 403, recorder.Code)
+}
+
+func TestHandler_LoginWeb(t *testing.T) {
+	// redirectSuccess
+	recorder := call(req("POST", "/context/login", "username=bob&password=secret", TypeForm, AcceptHTML))
+	Equal(t, 303, recorder.Code)
+	Equal(t, "/", recorder.Header().Get("Location"))
+
+	// verify the token from the cookie
+	setCookieList := readSetCookies(recorder.Header())
+	Equal(t, 1, len(setCookieList))
+
+	cookie := setCookieList[0]
+	Equal(t, "jwt_token", cookie.Name)
+	Equal(t, "/", cookie.Path)
+	Equal(t, "example.com", cookie.Domain)
+	InDelta(t, time.Now().Add(testConfig().CookieExpiry).Unix(), cookie.Expires.Unix(), 2)
+	True(t, cookie.HttpOnly)
+
+	// check the token content
+	claims, err := tokenAsMap(cookie.Value)
+	NoError(t, err)
+	Equal(t, "bob", claims["sub"])
+	InDelta(t, time.Now().Add(DefaultConfig().JwtExpiry).Unix(), claims["exp"], 2)
+
+	// show the login form again after authentication failed
+	recorder = call(req("POST", "/context/login", "username=bob&password=FOOBAR", TypeForm, AcceptHTML))
+	Equal(t, 403, recorder.Code)
+	Contains(t, recorder.Body.String(), `class="container"`)
+	Equal(t, recorder.Header().Get("Set-Cookie"), "")
+}
+
+func TestHandler_SetSecureCookie(t *testing.T) {
+	tests := []struct {
+		name   string
+		secure bool
+	}{
+		{"secure", true},
+		{"unsecure", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, err := http.NewRequest("OPTION", "/foobar", nil)
+			if err != nil {
+				t.Fatalf("Unable to create request: %v", err)
+			}
+			w := httptest.NewRecorder()
+			cfg := testConfig()
+			h := testHandler()
+			cfg.CookieSecure = tt.secure
+			h.config = cfg
+
+			h.respondAuthenticatedHTML(w, r, "RANDOM_TOKEN_VALUE")
+
+			cc := w.Result().Cookies()
+			foundCookie := false
+			for _, c := range cc {
+				if c.Name != cfg.CookieName {
+					continue
+				}
+				foundCookie = true
+				if c.Secure != tt.secure {
+					t.Errorf("Found token cookie %q with secure flag %t; expected %t", cfg.CookieName, c.Secure, tt.secure)
+				}
+			}
+			if !foundCookie {
+				t.Errorf("No token cookie with the name %q (Config.CookieName) found", cfg.CookieName)
+			}
+		})
+	}
+}
+
+func TestHandler_Refresh(t *testing.T) {
+	h := testHandler()
+	input := model.UserInfo{Sub: "bob", Expiry: time.Now().Add(time.Second).Unix()}
+	token, err := h.createToken(input)
+	NoError(t, err)
+
+	cookieStr := "Cookie: " + h.config.CookieName + "=" + token + ";"
+
+	// refreshSuccess
+	recorder := call(req("POST", "/context/login", "", AcceptHTML, cookieStr))
+	Equal(t, 303, recorder.Code)
+
+	// verify the token from the cookie
+	setCookieList := readSetCookies(recorder.Header())
+	Equal(t, 1, len(setCookieList))
+
+	cookie := setCookieList[0]
+	Equal(t, "jwt_token", cookie.Name)
+	Equal(t, "/", cookie.Path)
+	Equal(t, "example.com", cookie.Domain)
+	InDelta(t, time.Now().Add(testConfig().CookieExpiry).Unix(), cookie.Expires.Unix(), 2)
+	True(t, cookie.HttpOnly)
+
+	// check the token content
+	claims, err := tokenAsMap(cookie.Value)
+	NoError(t, err)
+	Equal(t, "bob", claims["sub"])
+	InDelta(t, time.Now().Add(DefaultConfig().JwtExpiry).Unix(), claims["exp"], 2)
+}
+
+func TestHandler_Refresh_Expired(t *testing.T) {
+	h := testHandler()
+	input := model.UserInfo{Sub: "bob", Expiry: time.Now().Unix() - 1}
+	token, err := h.createToken(input)
+	NoError(t, err)
+
+	cookieStr := "Cookie: " + h.config.CookieName + "=" + token + ";"
+
+	// refreshSuccess
+	recorder := call(req("POST", "/context/login", "", AcceptHTML, cookieStr))
+	Equal(t, 403, recorder.Code)
+
+	// verify the token from the cookie
+	setCookieList := readSetCookies(recorder.Header())
+	Equal(t, 0, len(setCookieList))
+}
+
+func TestHandler_Refresh_Invalid_Token(t *testing.T) {
+	h := testHandler()
+
+	cookieStr := "Cookie: " + h.config.CookieName + "=kjsbkabsdkjbasdbkasbdk.dfgdfg.fdgdfg;"
+
+	// refreshSuccess
+	recorder := call(req("POST", "/context/login", "", AcceptHTML, cookieStr))
+	Equal(t, 403, recorder.Code)
+
+	// verify the token from the cookie
+	setCookieList := readSetCookies(recorder.Header())
+	Equal(t, 0, len(setCookieList))
+}
+
+func TestHandler_Refresh_Max_Refreshes_Reached(t *testing.T) {
+	h := testHandler()
+	input := model.UserInfo{Sub: "bob", Expiry: time.Now().Add(time.Second).Unix(), Refreshes: 1}
+	token, err := h.createToken(input)
+	NoError(t, err)
+
+	cookieStr := "Cookie: " + h.config.CookieName + "=" + token + ";"
+
+	// refreshSuccess
+	recorder := call(req("POST", "/context/login", "", AcceptJwt, cookieStr))
+	Equal(t, 403, recorder.Code)
+	Contains(t, recorder.Body.String(), "reached")
+
+	// verify the token from the cookie
+	setCookieList := readSetCookies(recorder.Header())
+	Equal(t, 0, len(setCookieList))
+}
+
+func TestHandler_Logout(t *testing.T) {
+	// DELETE
+	recorder := call(req("DELETE", "/context/login", ""))
+	Equal(t, 200, recorder.Code)
+	checkDeleteCookei(t, recorder.Header())
+
+	// GET  + param
+	recorder = call(req("GET", "/context/login?logout=true", ""))
+	Equal(t, 200, recorder.Code)
+	checkDeleteCookei(t, recorder.Header())
+
+	// POST + param
+	recorder = call(req("POST", "/context/login", "logout=true", TypeForm))
+	Equal(t, 200, recorder.Code)
+	checkDeleteCookei(t, recorder.Header())
+
+	Equal(t, "no-cache, no-store, must-revalidate", recorder.Header().Get("Cache-Control"))
+}
+
+func checkDeleteCookei(t *testing.T, h http.Header) {
+	setCookieList := readSetCookies(h)
+	Equal(t, 1, len(setCookieList))
+	cookie := setCookieList[0]
+
+	Equal(t, "jwt_token", cookie.Name)
+	Equal(t, "/", cookie.Path)
+	Equal(t, "example.com", cookie.Domain)
+	Equal(t, int64(0), cookie.Expires.Unix())
+}
+
+func TestHandler_CustomLogoutURL(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.LogoutURL = "http://example.com"
+	h := &Handler{
+		oauth:  oauth2.NewManager(),
+		config: cfg,
+	}
+
+	recorder := httptest.NewRecorder()
+	h.ServeHTTP(recorder, req("DELETE", "/login", ""))
+	Contains(t, recorder.Header().Get("Set-Cookie"), "jwt_token=delete; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT;")
+	Equal(t, 303, recorder.Code)
+	Equal(t, "http://example.com", recorder.Header().Get("Location"))
+}
+
+func TestHandler_LoginError(t *testing.T) {
+	h := testHandlerWithError()
+
+	// backend returning an error with result type == jwt
+	request := req("POST", "/context/login", `{"username": "bob", "password": "secret"}`, TypeJSON, AcceptJwt)
+	recorder := httptest.NewRecorder()
+	h.ServeHTTP(recorder, request)
+
+	Equal(t, 500, recorder.Code)
+	Equal(t, recorder.Header().Get("Content-Type"), "text/plain")
+	Equal(t, recorder.Body.String(), "Internal Server Error")
+
+	// backend returning an error with result type == html
+	request = req("POST", "/context/login", `{"username": "bob", "password": "secret"}`, TypeJSON, AcceptHTML)
+	recorder = httptest.NewRecorder()
+	h.ServeHTTP(recorder, request)
+
+	Equal(t, 500, recorder.Code)
+	Contains(t, recorder.Header().Get("Content-Type"), "text/html")
+	Contains(t, recorder.Body.String(), `class="container"`)
+	Contains(t, recorder.Body.String(), "Internal Error")
+}
+
+func TestHandler_LoginWithEmptyUsername(t *testing.T) {
+	h := testHandler()
+
+	// backend returning an error with result type == jwt
+	request := req("POST", "/context/login", `{"username": "", "password": ""}`, TypeJSON, AcceptJwt)
+	recorder := httptest.NewRecorder()
+	h.ServeHTTP(recorder, request)
+
+	Equal(t, 403, recorder.Code)
+	Equal(t, recorder.Header().Get("Content-Type"), "text/plain")
+	Equal(t, recorder.Body.String(), "Wrong credentials")
+}
+
+func TestHandler_getToken_Valid(t *testing.T) {
+	h := testHandler()
+	input := model.UserInfo{Sub: "marvin", Expiry: time.Now().Add(time.Second).Unix()}
+	token, err := h.createToken(input)
+	NoError(t, err)
+	r := &http.Request{
+		Header: http.Header{"Cookie": {h.config.CookieName + "=" + token + ";"}},
+	}
+	userInfo, valid := h.GetToken(r)
+	True(t, valid)
+	Equal(t, input, userInfo)
+}
+
+func TestHandler_ReturnUserInfoJSON(t *testing.T) {
+	h := testHandler()
+	input := model.UserInfo{Sub: "marvin", Expiry: time.Now().Add(time.Second).Unix()}
+	token, err := h.createToken(input)
+	NoError(t, err)
+	url, _ := url.Parse("/context/login")
+	r := &http.Request{
+		Method: "GET",
+		URL:    url,
+		Header: http.Header{
+			"Cookie": {h.config.CookieName + "=" + token + ";"},
+			"Accept": {"application/json"},
+		},
+	}
+
+	recorder := call(r)
+	Equal(t, 200, recorder.Code)
+	Equal(t, "application/json", recorder.Header().Get("Content-Type"))
+
+	output := model.UserInfo{}
+	json.Unmarshal(recorder.Body.Bytes(), &output)
+
+	Equal(t, input, output)
+}
+
+func TestHandler_ReturnUserInfoJSON_InvalidToken(t *testing.T) {
+	h := testHandler()
+	url, _ := url.Parse("/context/login")
+	r := &http.Request{
+		Method: "GET",
+		URL:    url,
+		Header: http.Header{
+			"Cookie": {h.config.CookieName + "= 123;"},
+			"Accept": {"application/json"},
+		},
+	}
+
+	recorder := call(r)
+	Equal(t, 403, recorder.Code)
+	Equal(t, "application/json", recorder.Header().Get("Content-Type"))
+	output := map[string]interface{}{}
+	json.Unmarshal(recorder.Body.Bytes(), &output)
+	Equal(t, map[string]interface{}{"error": "Wrong credentials"}, output)
+}
+
+func TestHandler_signAndVerify_ES256(t *testing.T) {
+	h := testHandler()
+	h.config.JwtAlgo = "ES256"
+	h.config.JwtSecret = "MHcCAQEEIJKMecdA9ASkZArOu9b+cPmSiVfQaaeErHcvkqG2gVIOoAoGCCqGSM49AwEHoUQDQgAE1gae9/zJDLHeuFteUkKgVhLrwJPoA43goNacgwldOucBvVUzD0EFAcpCR+0UcOfQ99CxUyKxWtnvr9xpDIXU0w=="
+	input := model.UserInfo{Sub: "marvin", Expiry: time.Now().Add(time.Second).Unix()}
+	token, err := h.createToken(input)
+	NoError(t, err)
+	r := &http.Request{
+		Header: http.Header{"Cookie": {h.config.CookieName + "=" + token + ";"}},
+	}
+	userInfo, valid := h.GetToken(r)
+	True(t, valid)
+	Equal(t, input, userInfo)
+}
+
+func TestHandler_signAndVerify_RSA(t *testing.T) {
+	tt := []int{
+		256,
+		384,
+		512,
+	}
+	for _, bits := range tt {
+		jwtAlgo := fmt.Sprintf("RS%d", bits)
+		t.Run(jwtAlgo, func(t *testing.T) {
+			t.Parallel()
+
+			key, err := rsa.GenerateKey(rand.Reader, bits*2)
+			NoError(t, err)
+
+			privateKey := &pem.Block{
+				Type:  "PRIVATE KEY",
+				Bytes: x509.MarshalPKCS1PrivateKey(key),
+			}
+
+			h := testHandler()
+			h.config.JwtAlgo = jwtAlgo
+			h.config.JwtSecret = string(pem.EncodeToMemory(privateKey))
+
+			input := model.UserInfo{Sub: "marvin", Expiry: time.Now().Add(time.Second).Unix()}
+			token, err := h.createToken(input)
+			NoError(t, err)
+			r := &http.Request{
+				Header: http.Header{"Cookie": {h.config.CookieName + "=" + token + ";"}},
+			}
+			userInfo, valid := h.GetToken(r)
+			True(t, valid)
+			Equal(t, input, userInfo)
+		})
+	}
+
+	t.Run("headerless", func(t *testing.T) {
+		h := testHandler()
+		h.config.JwtAlgo = "RS256"
+		h.config.JwtSecret = "" +
+			"MIICXAIBAAKBgQDSu7M1jiH06fGywhSw5jdjUdfX6b1yw8j2coVjAgT1oB44vU+S" +
+			"dgvak/tWoBkqG+Gdrn0m+3H/mRtGXWZDmh6VjQ5mnw91OGVJccL2UGdEbb4ub/9g" +
+			"4Bobn1ANUcbZvXWpmNP0kqyBwsXiaq6iL4TNW5iKdvnat7SwzLyIkGwPkQIDAQAB" +
+			"AoGAXpshs1Nh7z/v4F69R0WzbAVcL3SiNpmq6Ok09OP9MgB2UOa8iHYykCiLV7J8" +
+			"Wak2usGRMiUEYslrs0VPGd5hB9X94fDAh0SYC2wmBOJRBY2tU82pSkN5RjE8A3+f" +
+			"G6uwlZB2UtpYa/sihf7NkJCQh2ibT3YeelDUvEnfwALB6iECQQDck14kDckwi4mt" +
+			"LwWPqXTWAdKdTN1i6KGXDBt7Bi5lbVk3XFgQy/Z+GzRiBtjcWmcMw2VOUeFC9d/J" +
+			"WnRv8NklAkEA9JOsxEgzr7utqw3Zd1dDK5weDhAwXuaHiCIS+bDAsGor7pSgWOtU" +
+			"k+kpDdPe/TmtxJFhorJOsl+49VtYVoy+/QJAWJnlhcv31cUnL2ak8DkcUl53EHJw" +
+			"tytExVy6qScpedp7rM4uHckgITWiTAH+GD1ECY9vYQ9o0bHcC5CHFvQC9QJBAOwI" +
+			"2ONVCwy+A4zhgM472QdtU1QfK49qy8IFoGp4un2G+X720Qj/lFBq5MQDhWC9GYZr" +
+			"B98MVgavesDPtyFQE8ECQCRZaTDF4d5KBAvu5ogoqEATD5r21V4Zj5uZ/QSeI7+v" +
+			"UVncBYg6g4CIrczoqYpJ3aBF5MVJ0FEU9XCDO/iDvCU="
+
+		input := model.UserInfo{Sub: "marvin", Expiry: time.Now().Add(time.Second).Unix()}
+		token, err := h.createToken(input)
+		NoError(t, err)
+		r := &http.Request{
+			Header: http.Header{"Cookie": {h.config.CookieName + "=" + token + ";"}},
+		}
+		userInfo, valid := h.GetToken(r)
+		True(t, valid)
+		Equal(t, input, userInfo)
+	})
+
+	t.Run("garbage key", func(t *testing.T) {
+		h := testHandler()
+		h.config.JwtAlgo = "RS256"
+		h.config.JwtSecret = "-garbage-"
+
+		input := model.UserInfo{Sub: "marvin", Expiry: time.Now().Add(time.Second).Unix()}
+		_, err := h.createToken(input)
+		Error(t, err)
+	})
+}
+
+func TestHandler_getToken_InvalidSecret(t *testing.T) {
+	h := testHandler()
+	input := model.UserInfo{Sub: "marvin"}
+	token, err := h.createToken(input)
+	NoError(t, err)
+	r := &http.Request{
+		Header: http.Header{"Cookie": {h.config.CookieName + "=" + token + ";"}},
+	}
+	// modify secret
+	h.config.JwtSecret = "foobar"
+	_, valid := h.GetToken(r)
+	False(t, valid)
+}
+
+func TestHandler_getToken_InvalidToken(t *testing.T) {
+	h := testHandler()
+	r := &http.Request{
+		Header: http.Header{"Cookie": {h.config.CookieName + "=asdcsadcsadc"}},
+	}
+
+	_, valid := h.GetToken(r)
+	False(t, valid)
+}
+
+func TestHandler_getToken_InvalidNoToken(t *testing.T) {
+	h := testHandler()
+	_, valid := h.GetToken(&http.Request{})
+	False(t, valid)
+}
+
+func TestHandler_getToken_WithUserClaims(t *testing.T) {
+	h := testHandler()
+	input := model.UserInfo{Sub: "marvin", Expiry: time.Now().Add(time.Second).Unix()}
+	h.userClaims = func(userInfo model.UserInfo) (jwt.Claims, error) {
+		return customClaims{"sub": "Zappod", "origin": "fake", "exp": userInfo.Expiry}, nil
+	}
+	token, err := h.createToken(input)
+
+	NoError(t, err)
+	r := &http.Request{
+		Header: http.Header{"Cookie": {h.config.CookieName + "=" + token + ";"}},
+	}
+	userInfo, valid := h.GetToken(r)
+	True(t, valid)
+	Equal(t, "Zappod", userInfo.Sub)
+	Equal(t, "fake", userInfo.Origin)
+}
+
+func testHandler() *Handler {
+	return &Handler{
+		backends: []Backend{
+			NewSimpleBackend(map[string]string{"bob": "secret"}),
+		},
+		oauth:  oauth2.NewManager(),
+		config: testConfig(),
+	}
+}
+
+func testHandlerWithError() *Handler {
+	return &Handler{
+		backends: []Backend{
+			errorTestBackend("test error"),
+		},
+		oauth:  oauth2.NewManager(),
+		config: testConfig(),
+	}
+}
+
+func call(req *http.Request) *httptest.ResponseRecorder {
+	recorder := httptest.NewRecorder()
+	h := testHandler()
+	h.ServeHTTP(recorder, req)
+	return recorder
+}
+
+func req(method string, url string, body string, header ...string) *http.Request {
+	r, err := http.NewRequest(method, url, strings.NewReader(body))
+	if err != nil {
+		panic(err)
+	}
+	for _, h := range header {
+		pair := strings.SplitN(h, ": ", 2)
+		r.Header.Add(pair[0], pair[1])
+	}
+	return r
+}
+
+func tokenAsMap(tokenString string) (map[string]interface{}, error) {
+	token, err := jwt.Parse(tokenString, func(*jwt.Token) (interface{}, error) {
+		return []byte(DefaultConfig().JwtSecret), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		return map[string]interface{}(claims), nil
+	}
+
+	return nil, errors.New("token not valid")
+}
+
+type errorTestBackend string
+
+func (h errorTestBackend) Authenticate(username, password string) (bool, model.UserInfo, error) {
+	return false, model.UserInfo{}, errors.New(string(h))
+}
+
+type oauth2ManagerMock struct {
+	_Handle func(w http.ResponseWriter, r *http.Request) (
+		startedFlow bool,
+		authenticated bool,
+		userInfo model.UserInfo,
+		err error)
+	_AddConfig            func(providerName string, opts map[string]string) error
+	_GetConfigFromRequest func(r *http.Request) (oauth2.Config, error)
+}
+
+func (m *oauth2ManagerMock) Handle(w http.ResponseWriter, r *http.Request) (
+	startedFlow bool,
+	authenticated bool,
+	userInfo model.UserInfo,
+	err error) {
+	return m._Handle(w, r)
+}
+func (m *oauth2ManagerMock) AddConfig(providerName string, opts map[string]string) error {
+	return m._AddConfig(providerName, opts)
+}
+func (m *oauth2ManagerMock) GetConfigFromRequest(r *http.Request) (oauth2.Config, error) {
+	return m._GetConfigFromRequest(r)
+}
+
+// copied from golang: net/http/cookie.go
+// with some simplifications for edge cases
+// readSetCookies parses all "Set-Cookie" values from
+// the header h and returns the successfully parsed Cookies.
+func readSetCookies(h http.Header) []*http.Cookie {
+	cookieCount := len(h["Set-Cookie"])
+	if cookieCount == 0 {
+		return []*http.Cookie{}
+	}
+	cookies := make([]*http.Cookie, 0, cookieCount)
+	for _, line := range h["Set-Cookie"] {
+		parts := strings.Split(strings.TrimSpace(line), ";")
+		if len(parts) == 1 && parts[0] == "" {
+			continue
+		}
+		parts[0] = strings.TrimSpace(parts[0])
+		j := strings.Index(parts[0], "=")
+		if j < 0 {
+			continue
+		}
+
+		name, value := parts[0][:j], parts[0][j+1:]
+
+		c := &http.Cookie{
+			Name:  name,
+			Value: value,
+			Raw:   line,
+		}
+
+		readCookiesParts(c, parts)
+		cookies = append(cookies, c)
+	}
+	return cookies
+}
+
+func readCookiesParts(c *http.Cookie, parts []string) {
+	for i := 1; i < len(parts); i++ {
+		parts[i] = strings.TrimSpace(parts[i])
+		if len(parts[i]) == 0 {
+			continue
+		}
+		attr, val := parts[i], ""
+		if j := strings.Index(attr, "="); j >= 0 {
+			attr, val = attr[:j], attr[j+1:]
+		}
+		lowerAttr := strings.ToLower(attr)
+		switch lowerAttr {
+		case "secure":
+			c.Secure = true
+			continue
+		case "httponly":
+			c.HttpOnly = true
+			continue
+		case "domain":
+			c.Domain = val
+			continue
+		case "max-age":
+			secs, err := strconv.Atoi(val)
+			if err != nil {
+				break
+			}
+			c.MaxAge = secs
+			continue
+		case "expires":
+			c.RawExpires = val
+			exptime, err := time.Parse(time.RFC1123, val)
+			if err != nil {
+				exptime, err = time.Parse("Mon, 02-Jan-2006 15:04:05 MST", val)
+				if err != nil {
+					c.Expires = time.Time{}
+					break
+				}
+			}
+			c.Expires = exptime.UTC()
+			continue
+		case "path":
+			c.Path = val
+			continue
+		}
+		c.Unparsed = append(c.Unparsed, parts[i])
+	}
+}

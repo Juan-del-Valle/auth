@@ -1,0 +1,3 @@
+- claims:
+    https://hasura.io/jwt/claims:
+      x-hasura-default-role: user
