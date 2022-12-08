@@ -2,8 +2,8 @@ package htpasswd
 
 import (
 	"errors"
-	"juandelvalle.com/auth/login"
-	"juandelvalle.com/auth/model"
+	"github.com/Juan-del-Valle/gkauth/login"
+	"github.com/Juan-del-Valle/gkauth/model"
 	"strings"
 )
 

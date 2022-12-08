@@ -1,8 +1,7 @@
 package htpasswd
 
 import (
-	. "github.com/stretchr/testify/assert"
-	"juandelvalle.com/auth/login"
+	"github.com/Juan-del-Valle/gkauth/login"
 	"os"
 	"strings"
 	"testing"

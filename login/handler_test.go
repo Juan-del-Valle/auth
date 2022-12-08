@@ -16,10 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgrijalva/jwt-go"
-	. "github.com/stretchr/testify/assert"
-	"juandelvalle.com/auth/model"
-	"juandelvalle.com/auth/oauth2"
+	"github.com/Juan-del-Valle/gkauth/model"
+	"github.com/Juan-del-Valle/gkauth/oauth2"
 )
 
 const TypeJSON = "Content-Type: application/json"

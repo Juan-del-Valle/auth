@@ -7,7 +7,6 @@ import (
 
 	. "github.com/stretchr/testify/assert"
 	"io/ioutil"
-	"juandelvalle.com/auth/oauth2"
 )
 
 const BadReferer = "Referer: http://evildomain.com"

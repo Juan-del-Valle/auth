@@ -2,7 +2,7 @@ package login
 
 import (
 	"errors"
-	"juandelvalle.com/auth/model"
+	"github.com/Juan-del-Valle/gkauth/model"
 )
 
 // SimpleProviderName const with the providers name

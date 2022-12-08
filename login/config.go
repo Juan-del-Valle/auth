@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"juandelvalle.com/auth/logging"
-	"juandelvalle.com/auth/oauth2"
+	"github.com/Juan-del-Valle/gkauth/logging"
+	"github.com/Juan-del-Valle/gkauth/oauth2"
 )
 
 var jwtDefaultSecret string

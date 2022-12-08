@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"juandelvalle.com/auth/model"
+	"github.com/Juan-del-Valle/gkauth/model"
 )
 
 var bitbucketAPI = "https://api.bitbucket.org/2.0"

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"juandelvalle.com/auth/model"
+	"github.com/Juan-del-Valle/gkauth/model"
 )
 
 var googleUserinfoEndpoint = "https://www.googleapis.com/oauth2/v3/userinfo"

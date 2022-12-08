@@ -8,11 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dgrijalva/jwt-go"
+	"github.com/Juan-del-Valle/gkauth/logging"
+	"github.com/Juan-del-Valle/gkauth/model"
+	"github.com/Juan-del-Valle/gkauth/oauth2"
 	"github.com/pkg/errors"
-	"juandelvalle.com/auth/logging"
-	"juandelvalle.com/auth/model"
-	"juandelvalle.com/auth/oauth2"
 )
 
 const contentTypeHTML = "text/html; charset=utf-8"

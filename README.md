@@ -3,8 +3,8 @@
 loginsrv is a standalone minimalistic login server providing a [JWT](https://jwt.io/) login for multiple login backends.
 
 [![Docker](https://img.shields.io/docker/pulls/tarent/loginsrv.svg)](https://hub.docker.com/r/tarent/loginsrv/)
-[![Build Status](https://juandelvalle.com/auth/workflows/test/badge.svg)](https://juandelvalle.com/auth/actions)
-[![Go Report Card](https://goreportcard.com/badge/juandelvalle.com/auth)](https://goreportcard.com/report/juandelvalle.com/auth)
+[![Build Status](https://github.com/Juan-del-Valle/gkauth/workflows/test/badge.svg)](https://github.com/Juan-del-Valle/gkauth/actions)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Juan-del-Valle/gkauth)](https://goreportcard.com/report/github.com/Juan-del-Valle/gkauth)
 [![Coverage Status](https://coveralls.io/repos/github/tarent/loginsrv/badge.svg?branch=master)](https://coveralls.io/github/tarent/loginsrv?branch=master)
 [![Join the chat at https://gitter.im/tarent/loginsrv](https://badges.gitter.im/tarent/loginsrv.svg)](https://gitter.im/tarent/loginsrv?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
@@ -336,7 +336,7 @@ $ docker run -p 80:80 tarent/loginsrv -github client_id=xxx,client_secret=yyy
 ## Templating
 
 A custom template can be supplied by the parameter `template`.
-You can find the original template in [login/login_form.go](https://juandelvalle.com/auth/blob/master/login/login_form.go).
+You can find the original template in [login/login_form.go](https://github.com/Juan-del-Valle/gkauth/blob/master/login/login_form.go).
 
 The templating uses the Golang template package. A short intro can be found [here](https://astaxie.gitbooks.io/build-web-application-with-golang/en/07.4.html).
 

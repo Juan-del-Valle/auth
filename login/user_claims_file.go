@@ -3,10 +3,10 @@ package login
 import (
 	"io/ioutil"
 
+	"github.com/Juan-del-Valle/gkauth/model"
 	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/pkg/errors"
 	yaml "gopkg.in/yaml.v2"
-	"juandelvalle.com/auth/model"
 )
 
 type hasuraClaims struct {

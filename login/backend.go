@@ -1,7 +1,7 @@
 package login
 
 import (
-	"juandelvalle.com/auth/model"
+	"github.com/Juan-del-Valle/gkauth/model"
 )
 
 // Backend is an loginsrv authentication extension

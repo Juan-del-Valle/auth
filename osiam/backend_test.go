@@ -1,8 +1,7 @@
 package osiam
 
 import (
-	. "github.com/stretchr/testify/assert"
-	"juandelvalle.com/auth/model"
+	"github.com/Juan-del-Valle/gkauth/model"
 	"net/http"
 	"net/http/httptest"
 	"testing"

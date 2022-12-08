@@ -7,9 +7,9 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/Juan-del-Valle/gkauth/model"
 	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/pkg/errors"
-	"juandelvalle.com/auth/model"
 )
 
 type userClaimsProvider struct {

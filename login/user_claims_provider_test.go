@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Juan-del-Valle/gkauth/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"juandelvalle.com/auth/model"
 )
 
 const (

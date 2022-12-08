@@ -7,8 +7,7 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/stretchr/testify/assert"
-	"juandelvalle.com/auth/login"
+	"github.com/Juan-del-Valle/gkauth/login"
 )
 
 func TestSetup(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	"juandelvalle.com/auth/model"
+	"github.com/Juan-del-Valle/gkauth/model"
 )
 
 // Manager has the responsibility to handle the user user requests in an oauth flow.

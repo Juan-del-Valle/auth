@@ -1,7 +1,7 @@
 package oauth2
 
 import (
-	"juandelvalle.com/auth/model"
+	"github.com/Juan-del-Valle/gkauth/model"
 )
 
 // Provider is the description of an oauth provider adapter

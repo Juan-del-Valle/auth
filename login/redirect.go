@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"juandelvalle.com/auth/logging"
+	"github.com/Juan-del-Valle/gkauth/logging"
 )
 
 func (h *Handler) setRedirectCookie(w http.ResponseWriter, r *http.Request) {

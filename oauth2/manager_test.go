@@ -7,8 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	. "github.com/stretchr/testify/assert"
-	"juandelvalle.com/auth/model"
+	"github.com/Juan-del-Valle/gkauth/model"
 )
 
 func Test_Manager_Positive_Flow(t *testing.T) {

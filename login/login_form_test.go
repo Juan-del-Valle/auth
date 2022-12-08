@@ -1,9 +1,8 @@
 package login
 
 import (
-	. "github.com/stretchr/testify/assert"
+	"github.com/Juan-del-Valle/gkauth/model"
 	"io/ioutil"
-	"juandelvalle.com/auth/model"
 	"net/http/httptest"
 	"os"
 	"testing"

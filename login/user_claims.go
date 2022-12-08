@@ -3,9 +3,8 @@ package login
 import (
 	"time"
 
-	"github.com/dgrijalva/jwt-go"
+	"github.com/Juan-del-Valle/gkauth/model"
 	"github.com/pkg/errors"
-	"juandelvalle.com/auth/model"
 )
 
 type customClaims map[string]interface{}

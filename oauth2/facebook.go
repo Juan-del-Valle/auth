@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"juandelvalle.com/auth/model"
+	"github.com/Juan-del-Valle/gkauth/model"
 )
 
 var facebookAPI = "https://graph.facebook.com/v2.12"

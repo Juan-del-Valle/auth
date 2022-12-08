@@ -1,11 +1,11 @@
 package main
 
 import (
-	_ "juandelvalle.com/auth/htpasswd"
-	_ "juandelvalle.com/auth/httpupstream"
-	_ "juandelvalle.com/auth/osiam"
+	_ "github.com/Juan-del-Valle/gkauth/htpasswd"
+	_ "github.com/Juan-del-Valle/gkauth/httpupstream"
+	_ "github.com/Juan-del-Valle/gkauth/osiam"
 
-	"juandelvalle.com/auth/login"
+	"github.com/Juan-del-Valle/gkauth/login"
 
 	"context"
 	"fmt"
@@ -14,7 +14,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"juandelvalle.com/auth/logging"
+	"github.com/Juan-del-Valle/gkauth/logging"
 )
 
 const applicationName = "loginsrv"

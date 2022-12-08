@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"juandelvalle.com/auth/logging"
-	"juandelvalle.com/auth/model"
+	"github.com/Juan-del-Valle/gkauth/logging"
+	"github.com/Juan-del-Valle/gkauth/model"
 )
 
 const partials = `

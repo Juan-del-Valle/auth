@@ -3,7 +3,7 @@ package osiam
 import (
 	"errors"
 	"fmt"
-	"juandelvalle.com/auth/model"
+	"github.com/Juan-del-Valle/gkauth/model"
 	"net/url"
 )
 

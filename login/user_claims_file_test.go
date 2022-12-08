@@ -5,8 +5,7 @@ import (
 	"os"
 	"testing"
 
-	. "github.com/stretchr/testify/assert"
-	"juandelvalle.com/auth/model"
+	"github.com/Juan-del-Valle/gkauth/model"
 )
 
 var claimsExample = `

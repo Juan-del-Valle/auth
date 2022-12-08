@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"juandelvalle.com/auth/login"
-	"juandelvalle.com/auth/model"
+	"github.com/Juan-del-Valle/gkauth/login"
+	"github.com/Juan-del-Valle/gkauth/model"
 )
 
 // ProviderName const

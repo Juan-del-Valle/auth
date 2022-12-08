@@ -1,8 +1,8 @@
 package osiam
 
 import (
-	"juandelvalle.com/auth/logging"
-	"juandelvalle.com/auth/login"
+	"github.com/Juan-del-Valle/gkauth/logging"
+	"github.com/Juan-del-Valle/gkauth/login"
 )
 
 // OsiamProviderName const with the name of the provider
